@@ -1100,10 +1100,8 @@ def update_proxies_by_topology(VF, k, RV, RA, RR, FR, FE, PN, PX, V, F, g, A, W,
 # Fix edge distortion: Second priority (impose user-defined angle and distance constraints)
 # 1. Merge: If two neighboring proxies have similar plane proxies and small error
 # 2. Split: If two neighboring proxies' itersection line is far away from the regions' boundary
-'''
 def update_proxies_by_distortion(RR, PX, PN, FR, V, F, g, A, W, FN, ang_threshold, dist_threshold):
     pass
-'''
 
 # Fix local optimum: Third priority (only when energy distribution is uneven / variance is large)
 # 1. Merge: If two neighboring proxies have smallest error
