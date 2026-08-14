@@ -3,6 +3,7 @@ from xml.parsers.expat import errors
 import numpy as np
 import igl
 import polyscope as ps
+from scipy.optimize import brentq
 
 # debugger functions ------------------------------------------------------------------------------------------------------------------
 
@@ -993,7 +994,7 @@ def VSA(mode, path, init_seeds):
     iterations = 100
     for iteration in range(iterations):
         # Compute regions
-        k, D, FR, FE = flood(mode, V, F, FF, A, W, S, FN, PN, PX)
+        k, D, FR, FE = VSA_flood(mode, V, F, FF, A, W, S, FN, PN, PX)
         k, FR, D, _ = rebuild_region(FR, FF, FE)
         RV, RA, RR, topology_errors = compute_region_topology(F, k, FR, FF, VF, VV)
 
@@ -1006,17 +1007,19 @@ def VSA(mode, path, init_seeds):
                 pn, px = vector_compute_proxy_L2(V, F, g, A, W, mask)
             elif mode == "L21":
                 pn, px = vector_compute_proxy_L21(g, A, W, FN, mask)
+            elif mode == "H1":
+                pn, px = vector_compute_proxy_H1(V, F, g, A, W, FN, mask)
 
             PN[rid] = pn
             PX[rid] = px
 
         # merge and split regions
         if iteration != iterations-1:
-            if iteration < iterations*3/4 and iteration % 10 == 0:  
+            if iteration < iterations*3/5 and iteration % 5 == 0:  
                 k, FR, PX, PN = update_proxies_by_teleportation(mode, k, FR, FE, D, RR, PX, PN, V, F, g, A, W, FN)
             
             
-            elif topology_errors > 0 and iteration > iterations*1/2 and iteration % 5 == 0:
+            elif topology_errors > 0 and iteration > iterations*1/3 and iteration < iterations*2/3 and iteration+1 % 10 == 0:
                 # This method may try to split a region only has one face, which may result in a proxy with no faces assigned to it.
                 # So we need to clean up the lists later.
                 k, FR, PX, PN = update_proxies_by_topology(mode, VF, k, RV, RA, RR, FR, FE, PN, PX, V, F, g, A, W, FN)
@@ -1039,7 +1042,7 @@ def VSA(mode, path, init_seeds):
         print(f"Iteration {iteration}: {k} proxies, max error: {max(D)}, mean error: {sum(D)/k if k > 0 else 0}, topology errors: {topology_errors}")
 
     
-    n_F, n_FR = simplify_mesh(V, F, FR, FF, VV,  np.float64(0.000050))
+    n_F, n_FR = simplify_mesh(V, F, FR, FF, VV,  np.float64(0.0))
     n_FF, _ = igl.triangle_triangle_adjacency(n_F)
     n_k, n_FR, _, R_map = rebuild_region(n_FR, n_FF)
 
@@ -1121,7 +1124,7 @@ loop start:
           compute error (T_i, P_j, W_i: W_i is the local weight)
           push to priority queue/update labels
 """
-def flood(mode, V, F, FF, A, W, S, FN, PN, PX):
+def VSA_flood(mode, V, F, FF, A, W, S, FN, PN, PX):
     # Labels
     # Label: The first element is the state flag
     # (-1,-1,-1) = unqueued
@@ -1144,6 +1147,8 @@ def flood(mode, V, F, FF, A, W, S, FN, PN, PX):
             error = compute_error_L2(V, F, A, W, S_j, PN[j], PX[j])
         elif mode == "L21":
             error = compute_error_L21(A, W, FN, S_j, PN[j])
+        elif mode == "H1":
+            error = compute_error_H1(V, F, A, W, FN, S_j, PN[j], PX[j])
 
         # If the error is zero, we can skip it and mark it as finalized
         # otherwise, we push it to the priority queue and mark it as queued
@@ -1196,6 +1201,8 @@ def flood(mode, V, F, FF, A, W, S, FN, PN, PX):
                 error = compute_error_L2(V, F, A, W, fid_neighbor, PN[rid_winner], PX[rid_winner])
             elif mode == "L21":
                 error = compute_error_L21(A, W, FN, fid_neighbor, PN[rid_winner])
+            elif mode == "H1":
+                error = compute_error_H1(V, F, A, W, FN, fid_neighbor, PN[rid_winner], PX[rid_winner])
 
                 # push to priority queue
             heapq.heappush(pq,(error, fid_neighbor, rid_winner))
@@ -1391,6 +1398,8 @@ def split_regions(mode, k, FR, PX, PN, V, F, g, A, W, FN, fids):
             pn, px = vector_compute_proxy_L2(V, F, g, A, W, mask)
         elif mode == "L21":
             pn, px = vector_compute_proxy_L21(g, A, W, FN, mask)
+        elif mode == "H1":
+            pn, px = vector_compute_proxy_H1(V, F, g, A, W, FN, mask)
 
         PN[old_rid] = pn
         PX[old_rid] = px
@@ -1414,6 +1423,8 @@ def merge_regions(mode, rid_chunks, FN, FR, k, PX, PN, V, F, g, A, W):
             new_pn, new_px = vector_compute_proxy_L2(V, F, g, A, W, mask)
         elif mode == "L21":
             new_pn, new_px = vector_compute_proxy_L21(g, A, W, FN, mask)
+        elif mode == "H1":
+            new_pn, new_px = vector_compute_proxy_H1(V, F, g, A, W, FN, mask)
 
         # mark the old regions as deleted
         id_deleted.extend(rid_list)
@@ -1539,17 +1550,18 @@ def vector_compute_proxy_L21(g, A, W, FN, region_mask):
     return PN_j, PX_j
 
 # Sobolev H1 metric
-_lambda = 1.0 # (0 < lambda < infinity)
+gamma = 1.2 # (0 < gamma < infinity)
 def compute_error_H1(V, F, A, W, FN, fid, PN_j, PX_j): # W_i is the weight for fid
-   E_i = compute_error_L2(V, F, A, W, fid, PN_j, PX_j) + _lambda * compute_error_L21(A, W, FN, fid, PN_j)
+   E_i = compute_error_L2(V, F, A, W, fid, PN_j, PX_j) + gamma * compute_error_L21(A, W, FN, fid, PN_j)
    return E_i
 # root solver needed
 def vector_compute_proxy_H1(V, F, g, A, W, FN, region_mask):
-    """
     g_i = g[region_mask]
     A_i = A[region_mask]
     W_i = W[region_mask]
+    N_i = FN[region_mask]
     AW_i = A_i * W_i
+    m_i = (AW_i[:, np.newaxis] * N_i).sum(axis=0)
     RA_j = AW_i.sum()
     PX_j = (AW_i[:, np.newaxis] * g_i).sum(axis=0) / RA_j
 
@@ -1584,13 +1596,29 @@ def vector_compute_proxy_H1(V, F, g, A, W, FN, region_mask):
     M_cov = (AW_i[:, np.newaxis, np.newaxis] *((1 / 36) * MTQM + ggT)).sum(axis=0) - RA_j * (PX_j[:, None] @ PX_j[None, :])
 
     # Compute the eigenvector corresponding to the smallest eigenvalue
-    eigvals, eigvecs = np.linalg.eigh(M_cov)
-    id_min = np.argmin(eigvals)
-    PN_j = eigvecs[:, id_min] # [:,_] means all rows
-    PN_j /= np.linalg.norm(PN_j) # normalize the vector
-    """
+    lam, U = np.linalg.eigh(M_cov)
 
-    pass
+    a = U.T @ m_i
+
+    eps = 1e-12
+
+    def f(rho):
+        return gamma**2 * np.sum(a**2 / (lam - rho)**2) - 1.0
+
+    upper = lam[0] - eps
+    lower = lam[0] - 1.0
+
+    while f(lower) > 0: # exponential search for a lower bound
+        lower -= 2.0 * (upper - lower)
+
+    rho = brentq(f, lower, upper)
+
+    b = gamma * a / (lam - rho)
+
+    PN_j = U @ b
+    PN_j /= np.linalg.norm(PN_j)
+
+    return PN_j, PX_j
 
 
 
@@ -1812,8 +1840,13 @@ def dijkstra_voronoi(V, vv_adj, seeds_constraint, min_dist_constraint):
 
 # Main function
 def main():
-    seed_array = np.random.randint(0, 65000, size=140)
-    VSA("L21", "C:\\Users\\yangw\\Desktop\\CG_projects\\vsa_project\\stanford-bunny.obj", seed_array)
+    # gamma should be 0.25
+    #seed_array = np.random.randint(0, 65000, size=200)
+    #VSA("L21", "C:\\Users\\yangw\\Desktop\\CG_projects\\vsa_project\\testsurface1.obj", seed_array)
+
+    # gamma should be 1
+    seed_array = np.random.randint(0, 65000, size=60) # H1 only needs 60. L2 needs 100. L21 needs 45.
+    VSA("H1", "C:\\Users\\yangw\\Desktop\\CG_projects\\vsa_project\\torus.obj", seed_array)
 
 if __name__ == "__main__":
     main()
