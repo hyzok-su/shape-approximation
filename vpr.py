@@ -1142,8 +1142,6 @@ def VPR(mode, path, init_seeds):
     output_filepath6 = dir / f"{filename}_PX_{mode}.npy"
     output_filepath7 = dir / f"{filename}_PN_{mode}.npy"
 
-    #V = cotan_taubin_smooth(V, F, 10) 
-
     # Adjacency Lists
     # Face-face adjacency
     FF, _ = igl.triangle_triangle_adjacency(F)
@@ -1159,12 +1157,6 @@ def VPR(mode, path, init_seeds):
 
     # list of face artificial weights
     _, _, PV1, PV2, _ = igl.principal_curvature(V,F,radius=5,useKring=False)
-    K_abs = np.abs(PV1 * PV2)
-    K_min = np.min(K_abs)
-    K_max = np.max(K_abs)
-    #K_remap= 1 + 2 * (K_abs - K_min) / (K_max - K_min)
-    #K_remap = 3 - 2 * (K_abs - K_min) / (K_max - K_min)
-    K_remap = 1 - 0 * (K_abs - K_min) / (K_max - K_min)
     W  = np.mean(K_remap[F], axis=1)
 
 
@@ -1194,8 +1186,6 @@ def VPR(mode, path, init_seeds):
         history[iteration] = FR
 
         RV, RA, RR, topology_errors = compute_region_topology(F, k, FR, FF, VF, VV)
-
-        #show_region_loop_debug(V, F, FR, VF, RV, RA, rid=20, loop_id=0)
         
         # Update Proxies
         for rid in range(k):
@@ -1297,7 +1287,6 @@ def VPR(mode, path, init_seeds):
         if n_topology_errors == 0:
             n_PX = [PX[rid] for rid in R_map]
             n_PN = [PN[rid] for rid in R_map]
-            #_, n_PN, n_PX = plane_fit_anchors(V, n_k, n_RR, n_RV, n_RA, n_PX, n_PN)
 
             np.save(output_filepath6, n_PX)
             np.save(output_filepath7, n_PN)
@@ -1353,20 +1342,12 @@ def VPR(mode, path, init_seeds):
     FaceColor,
     defined_on="faces")
 
-    #ps.get_surface_mesh("my_mesh").set_material("flat")
 
     ps.get_surface_mesh("my_mesh_simplified").add_color_quantity(
     "FaceColor",
     FaceColor2,
     defined_on="faces")
 
-    #ps.get_surface_mesh("my_mesh_simplified").set_material("flat")
-    """
-    ps.look_at(
-        camera_location=[-64.87759, 372.07935, 319.1375],
-        target=[-64.79070, 371.35425, 318.45437]
-    )
-    """
     ps.show()
 
     #Matplotlib visualization
