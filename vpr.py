@@ -919,19 +919,6 @@ def compute_region_topology(F, k, FR, FF, VF, VV):
                 while vid_next not in vid_next_map: # vid_next is a pinched vertex
                     
                     edge = (vid_this, vid_next)
-                    '''
-                    # debugger
-                    if edge not in pinched_vid_next_map:
-                        debug_render_region_pinches(
-                        rid=rid,
-                        F=F,
-                        V=V,
-                        FR=FR,
-                        RP=RP,
-                        RP_next_maps=RP_next_maps,
-                        failing_edge=edge,
-                    )
-                    '''
                     vid_next_next, _, rid_opp_next = pinched_vid_next_map[edge]
                     print(
                         "PINCHED LOOKUP", rid,
@@ -956,21 +943,6 @@ def compute_region_topology(F, k, FR, FF, VF, VV):
 
                 counter += 1
                 if counter > 99999:
-
-                    '''
-                    # debugger
-                    edge = (vid_this, vid_next)
-                    print(len(RP[rid])==0)
-                    debug_render_region_pinches(
-                        rid=rid,
-                        F=F,
-                        V=V,
-                        FR=FR,
-                        RP=RP,
-                        RP_next_maps=RP_next_maps,
-                        failing_edge=edge
-                    )
-                    '''
                     raise ValueError(f"Loop tracing fails at '{rid}'")
 
             ra_list = [] # list of anchor vertices in this loop
@@ -1185,20 +1157,6 @@ def VPR(mode, path, init_seeds):
     g, A, FN, FM = compute_face_properties(V, F)
     FN = face_normal_smooth(FN, FF, A, 15, 0.9)
 
-    """
-    # Show face normals debugger
-    face_centers = (V[F[:, 0]] + V[F[:, 1]] + V[F[:, 2]]) / 3.0
-    scale = 1
-    points = np.empty((2 * len(F), 3), dtype=np.float64)
-    # Start of each normal
-    points[0::2] = face_centers
-    # End of each normal, using YOUR FN
-    points[1::2] = face_centers + scale * FN
-    edges = np.column_stack([np.arange(0, 2 * len(F), 2), np.arange(1, 2 * len(F), 2)]).astype(np.int32)
-    ps.register_curve_network("face_normals", points, edges, radius=0.0002, color=(0.0, 1.0, 1.0))
-    """
-
-
     # list of face artificial weights
     _, _, PV1, PV2, _ = igl.principal_curvature(V,F,radius=5,useKring=False)
     K_abs = np.abs(PV1 * PV2)
@@ -1311,19 +1269,6 @@ def VPR(mode, path, init_seeds):
     
     n_V, n_F, n_FR, seeds_all, seeds_boundary, order_map = simplify_mesh(V, F, FR, FF, VV, VF, PX, PN, np.float64(0.00)) #0.25
     n_V, n_F, _, _ = igl.remove_unreferenced(n_V, n_F)
-
-
-    """
-    planar_deviation = region_planar_deviation_colors(n_V, n_F, n_FR, name="Region Deviation")
-    print(f"Planar deviation: min={planar_deviation.min()}, max={planar_deviation.max()}, mean={planar_deviation.mean()}")
-    """
-
-    """
-    # Display seed points and constraints debugger
-    V_b = V[seeds_boundary!=-1]
-    display_labeled_points(V, seeds_all, name="seed_Points", seed=42)
-    display_labeled_points(V_b, seeds_boundary[seeds_boundary!=-1], name="seed_Boundary", seed=42)
-    """
 
     n_FF, _ = igl.triangle_triangle_adjacency(n_F)
 
@@ -1753,17 +1698,6 @@ def teleportation(mode, ratio, V, F, k, FR, FE, D, RR, PX, PN, alpha, g, A, W, F
 
     print(f"Teleportation: merging regions ({min_d_pair[0]}, {min_d_pair[1]}) with predicted distortion {min_d} and splitting region {max_d_rid} with max distortion {max_d}")
 
-    '''
-    # Split at anchor: this region may not have any anchors, so sometimes it can fail to split.
-    vid_anchors = [
-        RV[max_d_rid][loop_id][anchor_id]
-        for loop_id, anchor_list in enumerate(RA[max_d_rid])
-        for anchor_id in anchor_list
-        ]
-    fid_list = [fid for vid in vid_anchors for fid in VF[vid] if FR[fid] == max_d_rid]
-    errors = np.array([FE[fid] for fid in fid_list])
-    fid_max_error = fid_list[np.argmax(errors)]
-    '''
     # Split at largest error face
     mask = FR == max_d_rid
     fid_list = np.where(mask)[0]
@@ -2332,18 +2266,6 @@ def simplify_mesh(V, F, FR, FF, VV, VF, PX, PN, collapse_threshold=np.float64(0.
         new_F.append([a1, a2, a3])
         new_FR.append(rid)
 
-    '''
-    # Debug visualization
-    unassigned_vids = np.where(seeds_final == -1)[0]
-    print(f"Unassigned vertices: {len(unassigned_vids)}")
-
-    # Register unassigned vertices
-    if len(unassigned_vids) > 0:
-        ps.register_point_cloud(
-            "unassigned_vertices",
-            V[unassigned_vids]
-        )
-    '''
     return new_V, np.array(new_F, dtype=np.int32), np.array(new_FR, dtype=np.int32), seeds_all, seeds_boundary, order_map          
 def dijkstra_voronoi(V, vv_adj, seeds_constraint, min_dist_constraint):
 
@@ -2569,16 +2491,6 @@ def compute_polygons(PX, PN, RR, V, RV, RA):
                     intersection_point = np.linalg.solve(A, b)
                     if np.sum((intersection_point-point)**2) > 100:
                         intersection_point = point
-
-                        """
-                        # Debug visualization
-                        ps.register_point_cloud(
-                            f"{int(RV[rid][loop_id][RA[rid][loop_id][i]])}",
-                            points=np.asarray([intersection_point], dtype=np.float64),
-                            radius=0.005,
-                            color=[1.0, 0.0, 0.0]
-                        )
-                        """
 
                         print(f"Warning: Intersection point for rid {rid}, loop {loop_id}, edge ({rid_start}, {rid_end}) is far from previous point.")
                 except np.linalg.LinAlgError:
